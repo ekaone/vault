@@ -38,16 +38,18 @@ import { createVault } from '@ekaone/vault'
 
 const vault = await createVault()
 
-await vault.set('claude_key', process.env.CLAUDE_API_KEY!, { ttl: 3600 })
-delete process.env.CLAUDE_API_KEY
+await vault.set('your_secret_key', process.env.YOUR_API_KEY!, { ttl: 3600 })
 
-const key = await vault.get('claude_key')
+// Remove the secret from the global environment object after startup so it is less likely to be exposed by logs, debugging tools, or accidental inspection.
+delete process.env.YOUR_API_KEY
+
+const key = await vault.get('your_secret_key')
 if (key) {
   // Use the secret here.
 }
 
 console.log(vault.snapshot())
-// { claude_key: '[sealed]' }
+// { your_secret_key: '[sealed]' }
 ```
 
 ## API
