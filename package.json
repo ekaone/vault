@@ -1,6 +1,6 @@
 {
   "name": "@ekaone/vault",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Encrypted, ephemeral, runtime-agnostic key-value store with TTL",
   "keywords": [
     "vault",
@@ -14,10 +14,6 @@
   ],
   "author": "ekaone",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ekaone/vault"
-  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -34,8 +30,13 @@
       }
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "pnpm typecheck && pnpm clean && pnpm tsup",
@@ -57,5 +58,13 @@
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ekaone/vault.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ekaone/vault/issues"
+  },
+  "homepage": "https://github.com/ekaone/vault#readme"
 }
