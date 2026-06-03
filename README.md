@@ -1,22 +1,29 @@
 # @ekaone/vault
 
-> Encrypted, ephemeral, runtime-agnostic key-value store with TTL. Secrets that can't leak what they don't expose.
+> Encrypted, ephemeral, runtime-agnostic key-value store with TTL.
+
+`@ekaone/vault` keeps runtime secrets encrypted in memory and only decrypts them when you explicitly call `get()`. It is designed for secrets that have already been loaded from `.env`, platform environment variables, or a secrets manager.
 
 ## Why
 
-When you load secrets from `.env` or a secrets manager, they become plain strings in RAM — visible in heap dumps, accidentally printed via `console.log`, and readable by any code in the process.
+When secrets are loaded into `process.env`, they become plain strings in process memory. They can appear in heap snapshots, accidental logs, error reports, or debugging output.
 
-`@ekaone/vault` closes that gap. It encrypts values with **AES-GCM 256-bit** via the Web Crypto API and holds them encrypted until you explicitly call `get()`.
+This package narrows that exposure window:
 
+```text
+.env / platform env / secrets manager
+        |
+        v
+process.env                 plain text
+        |
+        v
+vault.set()                 encrypted with AES-GCM
+        |
+        v
+delete process.env.SECRET   optional cleanup
 ```
-[.env / Platform ENV / Secrets Manager]
-              ↓  on startup
-       [process.env]       ← plain text, exposed
-              ↓  vault.set()
-       [@ekaone/vault]     ← AES-GCM encrypted, protected
-              ↓  delete process.env.X
-       [process.env clean]
-```
+
+Values are encrypted with AES-GCM 256-bit keys through the Web Crypto API. Each vault instance creates its own non-extractable `CryptoKey`, and each stored value gets a fresh random IV.
 
 ## Install
 
@@ -31,47 +38,62 @@ import { createVault } from '@ekaone/vault'
 
 const vault = await createVault()
 
-// Load from env — vault encrypts immediately
 await vault.set('claude_key', process.env.CLAUDE_API_KEY!, { ttl: 3600 })
-delete process.env.CLAUDE_API_KEY // optional clean slate
+delete process.env.CLAUDE_API_KEY
 
-// Use the secret
-const key = await vault.get('claude_key') // '636_hsgs' or null if expired
+const key = await vault.get('claude_key')
+if (key) {
+  // Use the secret here.
+}
 
-// Safe logging — values never exposed
-console.log(vault.snapshot()) // { claude_key: '[sealed]' }
+console.log(vault.snapshot())
+// { claude_key: '[sealed]' }
 ```
 
 ## API
 
 ### `createVault()`
 
-Creates a new vault instance. Generates a non-extractable AES-GCM 256-bit `CryptoKey` — raw bytes never leave Web Crypto internals.
+Creates a new isolated vault instance.
 
 ```ts
 const vault = await createVault()
 ```
 
+Each vault has its own in-memory store and its own non-extractable AES-GCM key. Entries are not shared between vault instances.
+
 ### `vault.set(key, value, opts?)`
 
-Encrypts and stores a value. Each entry gets a unique random IV.
+Encrypts and stores a string value.
 
 ```ts
 await vault.set('api_key', 'sk-...')
 await vault.set('token', 'xyz', { ttl: 900 }) // expires in 15 minutes
 ```
 
+Options:
+
+```ts
+type VaultOptions = {
+  ttl?: number // seconds
+}
+```
+
+A missing, zero, or negative TTL means the value lives until `delete()` or `clear()`.
+
 ### `vault.get(key)`
 
-Decrypts and returns the value, or `null` if missing or expired. Expired entries are auto-evicted.
+Decrypts and returns the value, or returns `null` when the key is missing or expired.
 
 ```ts
 const key = await vault.get('api_key') // string | null
 ```
 
+Expired entries are evicted lazily during `get()`. There are no background timers.
+
 ### `vault.delete(key)`
 
-Removes a single entry immediately.
+Removes a single entry.
 
 ```ts
 vault.delete('api_key')
@@ -79,79 +101,82 @@ vault.delete('api_key')
 
 ### `vault.clear()`
 
-Wipes all entries. The encryption key survives — vault is reusable.
+Removes every entry from the vault. The vault remains reusable.
 
 ```ts
 vault.clear()
+await vault.set('api_key', 'new-secret')
 ```
 
 ### `vault.snapshot()`
 
-Returns a redacted view — all values replaced with `[sealed]`. Safe to log or pass to error reporters.
+Returns a redacted view of the vault. Stored values are never included.
 
 ```ts
-vault.snapshot() // { api_key: '[sealed]', token: '[sealed]' }
+vault.snapshot()
+// { api_key: '[sealed]', token: '[sealed]' }
 ```
 
-## TTL
+## Ephemeral Behavior
 
-TTL is checked lazily on `get()` — no background timers. When a TTL expires, `get()` returns `null` and evicts the entry.
+Vault data is intentionally memory-only:
 
-```ts
-await vault.set('token', 'xyz', { ttl: 60 }) // 60 seconds
+- Creating a new vault starts with an empty store.
+- Entries are lost when the process or runtime instance ends.
+- `delete()` and `clear()` remove entries immediately.
+- TTL entries are removed the next time they are read after expiry.
 
-// ...61 seconds later
-await vault.get('token') // null — auto-evicted, no error thrown
-```
-
-Handle `null` in your app:
-
-```ts
-const token = await vault.get('token')
-if (!token) {
-  // re-fetch from secrets manager and reload
-  const fresh = await fetchFromSecretsManager('token')
-  await vault.set('token', fresh, { ttl: 3600 })
-}
-```
+This package does not persist secrets to disk, local storage, databases, or external services.
 
 ## Security Model
 
-| What an attacker sees | Without vault | With vault |
-|---|---|---|
-| Plain secret in heap snapshot | Always visible | Microseconds only (during set/get) |
-| Encrypted bytes at rest | — | All they see |
-| Encryption key bytes | — | Non-extractable, never visible |
+| Property | Behavior |
+| --- | --- |
+| Encryption | AES-GCM 256-bit via Web Crypto |
+| IVs | Fresh random IV per stored value |
+| Keys | Non-extractable `CryptoKey` per vault instance |
+| Snapshots | Redacted values only |
+| Persistence | None, memory-only |
 
-Vault does not make secrets invisible to a determined attacker with full process access. It makes **accidental exposure practically impossible** and deliberate extraction significantly harder.
+`@ekaone/vault` reduces accidental exposure of secrets in logs, snapshots, and ordinary application state. It does not make secrets invisible to code that is allowed to call `get()`, and it cannot fully protect against an attacker with complete control of the running process.
 
 ## Runtime Support
 
-| Runtime | Support |
-|---|---|
-| Node.js 18+ | ✅ Full |
-| Bun | ✅ Full |
-| Deno | ✅ Full |
-| Browser | ✅ Full |
-| Cloudflare Workers | ✅ Full |
-| Vercel / Netlify Functions | ⚠️ Not recommended — vault resets per request |
+Any runtime with the standard Web Crypto API should work.
 
-> **Note:** `@ekaone/vault` is designed for long-running processes. In serverless environments, vault state does not persist between requests.
+| Runtime | Support |
+| --- | --- |
+| Node.js 18+ | Full |
+| Bun | Full |
+| Deno | Full |
+| Browser | Full |
+| Cloudflare Workers | Full |
+| Vercel / Netlify Functions | Works, but state resets per invocation |
+
+For serverless and edge functions, treat the vault as request-local or instance-local cache. It should not be used as persistent storage.
+
+## Testing
+
+```bash
+npm test
+```
+
+The test suite covers encryption behavior, isolated vault instances, redacted snapshots, deletion, clearing, and TTL eviction.
 
 ## vs. Other Tools
 
-| Tool | Layer | Encrypted | TTL | Snapshot |
-|---|---|---|---|---|
-| dotenv | Load secrets into process | No | No | No |
-| AWS Secrets Manager | Store + distribute secrets | Yes (at rest) | No | No |
-| @ekaone/shielded | Hide values from logging | No | No | Yes |
-| **@ekaone/vault** | Protect secrets in process RAM | **Yes (AES-GCM)** | **Yes** | **Yes** |
+| Tool | Layer | Encrypted in process | TTL | Redacted snapshot |
+| --- | --- | --- | --- | --- |
+| dotenv | Loads env files | No | No | No |
+| AWS Secrets Manager | Stores and distributes secrets | No, not after fetch | No | No |
+| @ekaone/shielded | Hides values from logging | No | No | Yes |
+| @ekaone/vault | Protects runtime secrets | Yes | Yes | Yes |
 
-`@ekaone/vault` does not replace `.env` or secrets managers. It owns the **in-process layer** — what happens after you have already fetched secrets from wherever they live.
+`@ekaone/vault` does not replace `.env` files or secrets managers. It protects the in-process layer after secrets have already been fetched.
 
 ## License
 
-MIT © [Eka Prasetia](./LICENSE)
+MIT (c) [Eka Prasetia](./LICENSE)
 
 ## Links
 
@@ -165,7 +190,3 @@ MIT © [Eka Prasetia](./LICENSE)
 - [Token masking library](https://github.com/ekaone/mask-token)
 - [Phone masking library](https://github.com/ekaone/mask-phone)
 - [Email masking library](https://github.com/ekaone/mask-email)
-
----
-
-⭐ If this library helps you, please consider giving it a star on GitHub!
