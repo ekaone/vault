@@ -12,7 +12,11 @@
     "web-crypto",
     "security"
   ],
-  "author": "ekaone",
+  "author": {
+    "name": "Eka Prasetia",
+    "email": "ekaone3033@gmail.com",
+    "url": "https://prasetia.me"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -20,14 +24,9 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "publishConfig": {
